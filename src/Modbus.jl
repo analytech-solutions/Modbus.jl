@@ -15,7 +15,92 @@ module Modbus
 	end
 	
 	
-	export LibModbus
+	using Sockets
+	
+	export LibModbus, ModbusDevice, ModbusRef
 	
 	
+	abstract type ModbusKind end
+	struct TCP <: ModbusKind end
+	
+	mutable struct ModbusDevice
+		ptr::Ptr{LibModbus.modbus_t}
+		kind::ModbusKind
+		
+		function ModbusDevice(ptr::Ptr{LibModbus.modbus_t}, kind::ModbusKind)
+			mb = new(ptr, kind)
+			finalizer(mb) do x
+				LibModbus.modbus_close(x.ptr)
+				LibModbus.modbus_free(x.ptr)
+			end
+			return mb
+		end
+	end
+	
+	function ModbusDevice(addr::IPAddr, port::Integer)
+		ptr = LibModbus.modbus_new_tcp(string(addr), port)
+		systemerror("modbus_new_tcp", ptr == C_NULL)
+		systemerror("modbus_connect", LibModbus.modbus_connect(ptr) != 0)
+		return ModbusDevice(ptr, TCP())
+	end
+	
+	
+	
+	struct ModbusRef{T}
+		mb::ModbusDevice
+		addr::Int
+		count::Int
+		words::Vector{UInt16}
+		
+		ModbusRef{T}(mb::ModbusDevice, addr::Int, count::Int = 1, numwords::Int = 2) where {T} = new{T}(mb, addr, count, zeros(UInt16, numwords))
+	end
+	
+	Base.length(ref::ModbusRef) = ref.count
+	Base.size(ref::ModbusRef) = (ref.count,)
+	Base.eltype(ref::ModbusRef{T}) where {T} = T
+	Base.iterate(ref::ModbusRef, state = 1) = state > length(ref) ? nothing : (ref[state], state+1)
+	
+	function Base.read(ref::ModbusRef)
+		systemerror("modbus_read_registers", LibModbus.modbus_read_registers(ref.mb.ptr, ref.addr, length(ref.words), ref.words) != length(ref.words))
+	end
+	
+	function Base.fetch(ref::ModbusRef, ind::Int = 1)
+		val = UInt32(ref.words[1]) | (UInt32(ref.words[2]) << 16)
+		val = eltype(ref) <: AbstractFloat ?
+			reinterpret(Float32, val) :
+			eltype(ref) <: Signed ?
+				reinterpret(Int32, val) :
+				eltype(ref) <: Bool ?
+					(val != 0) :
+					val
+		return eltype(ref)(val)
+	end
+	
+	function Base.write(ref::ModbusRef, val, ind::Int = 1)
+		val = convert(eltype(ref), val)
+		val = eltype(ref) <: AbstractFloat ?
+			Float32(val) :
+			eltype(ref) <: Signed ?
+				Int32(val) :
+				eltype(ref) <: Bool ?
+					(val ? ~zero(UInt32) : zero(UInt32)) :
+					UInt32(val)
+		val = reinterpret(UInt32, val)
+		ref.words[1] = val & 0xffff
+		ref.words[2] = (val >> 16) & 0xffff
+	end
+	
+	function Base.flush(ref::ModbusRef)
+		systemerror("modbus_write_registers", LibModbus.modbus_write_registers(ref.mb.ptr, ref.addr, length(ref.words), ref.words) != length(ref.words))
+	end
+	
+	function Base.getindex(ref::ModbusRef, ind::Int = 1)
+		read(ref)
+		return fetch(ref, ind)
+	end
+	
+	function Base.setindex!(ref::ModbusRef, val, ind::Int = 1)
+		write(ref, val, ind)
+		flush(ref)
+	end
 end
