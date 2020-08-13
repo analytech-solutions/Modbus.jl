@@ -52,7 +52,7 @@ module Modbus
 		count::Int
 		words::Vector{UInt16}
 		
-		ModbusRef{T}(mb::ModbusDevice, addr::Int, count::Int = 1, numwords::Int = 2) where {T} = new{T}(mb, addr, count, zeros(UInt16, numwords))
+		ModbusRef{T}(mb::ModbusDevice, addr::Int, count::Int = 1, numwords::Int = 2) where {T} = new{T}(mb, addr, count, zeros(UInt16, numwords*count))
 	end
 	
 	Base.length(ref::ModbusRef) = ref.count
@@ -61,11 +61,12 @@ module Modbus
 	Base.iterate(ref::ModbusRef, state = 1) = state > length(ref) ? nothing : (ref[state], state+1)
 	
 	function Base.read(ref::ModbusRef)
+		# TODO: break up reads into pages (limited number of words can be read at a time)
 		systemerror("modbus_read_registers", LibModbus.modbus_read_registers(ref.mb.ptr, ref.addr, length(ref.words), ref.words) != length(ref.words))
 	end
 	
 	function Base.fetch(ref::ModbusRef, ind::Int = 1)
-		val = UInt32(ref.words[1]) | (UInt32(ref.words[2]) << 16)
+		val = UInt32(ref.words[(ind-1)*2 + 1]) | (UInt32(ref.words[(ind-1)*2 + 2]) << 16)
 		val = eltype(ref) <: AbstractFloat ?
 			reinterpret(Float32, val) :
 			eltype(ref) <: Signed ?
@@ -86,11 +87,12 @@ module Modbus
 					(val ? ~zero(UInt32) : zero(UInt32)) :
 					UInt32(val)
 		val = reinterpret(UInt32, val)
-		ref.words[1] = val & 0xffff
-		ref.words[2] = (val >> 16) & 0xffff
+		ref.words[(ind-1)*2 + 1] = val & 0xffff
+		ref.words[(ind-1)*2 + 2] = (val >> 16) & 0xffff
 	end
 	
 	function Base.flush(ref::ModbusRef)
+		# TODO: break up writes into pages (limited number of words can be written at a time)
 		systemerror("modbus_write_registers", LibModbus.modbus_write_registers(ref.mb.ptr, ref.addr, length(ref.words), ref.words) != length(ref.words))
 	end
 	
