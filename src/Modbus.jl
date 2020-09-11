@@ -30,8 +30,7 @@ module Modbus
 		function ModbusDevice(ptr::Ptr{LibModbus.modbus_t}, kind::ModbusKind)
 			mb = new(ptr, kind)
 			finalizer(mb) do x
-				LibModbus.modbus_close(x.ptr)
-				LibModbus.modbus_free(x.ptr)
+				ptr == C_NULL || close(x)
 			end
 			return mb
 		end
@@ -42,6 +41,12 @@ module Modbus
 		systemerror("modbus_new_tcp", ptr == C_NULL)
 		systemerror("modbus_connect", LibModbus.modbus_connect(ptr) != 0)
 		return ModbusDevice(ptr, TCP())
+	end
+	
+	function Base.close(mb::ModbusDevice)
+		LibModbus.modbus_close(mb.ptr)
+		LibModbus.modbus_free(mb.ptr)
+		mb.ptr = C_NULL
 	end
 	
 	
