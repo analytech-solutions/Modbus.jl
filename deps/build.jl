@@ -1,5 +1,4 @@
 using BinDeps
-using CBindingGen
 
 BinDeps.@setup
 
@@ -30,7 +29,7 @@ provides(
 				lib,
 				@build_steps(begin
 					`./autogen.sh`
-					`./configure --prefix=$(BinDeps.usrdir(modbus))`
+					`./configure --prefix=$(BinDeps.usrdir(modbus)) CFLAGS='-Wno-nullability-completeness' CXXFLAGS='-Wno-nullability-completeness'`
 					`make install`
 				end),
 			)
@@ -40,18 +39,3 @@ provides(
 )
 
 BinDeps.@install Dict(:modbus => :_modbus)
-
-incdir = joinpath(Sys.iswindows() ? bindir : BinDeps.includedir(modbus), "modbus")
-cvts = convert_header("modbus.h", args = ["-I", incdir, "-fparse-all-comments"]) do cursor
-	header = CodeLocation(cursor).file
-	name   = string(cursor)
-	
-	# only wrap the libmodbus headers
-	startswith(header, "$(incdir)/") || return false
-	
-	return true
-end
-
-open(joinpath(@__DIR__, "libmodbus.jl"), "w+") do io
-	generate(io, lib => cvts)
-end
